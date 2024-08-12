@@ -1,11 +1,15 @@
 ﻿using System.Diagnostics;
-using ASkyl.Treesize.Data;
 using CommunityToolkit.Maui.Storage;
+using ASkyl.Treesize.Data;
+using System.Text;
 
 namespace ASkyl.Treesize;
 
 public partial class MainPage : ContentPage
 {
+	private FileSystemNode? _tree;
+	private TimeSpan? _elapsed;
+
 	public MainPage()
 	{
 		InitializeComponent();
@@ -13,57 +17,64 @@ public partial class MainPage : ContentPage
 
 	private async void OnFolderClicked(object sender, EventArgs e)
 	{
+		Activity.IsRunning = true;
+		IsEnabled = false;
+
 		var result = await FolderPicker.PickAsync("");
 
-		var status = await Permissions.RequestAsync<Permissions.StorageRead>();
-
-		if (status == PermissionStatus.Granted)
+		if (result.IsSuccessful)
 		{
-			if (result.IsSuccessful)
+			var path = result.Folder.Path;
+
+			try
 			{
-				Activity.IsRunning = true;
-				IsEnabled = false;
+				var progressDirectory = new Progress<string>(x => WorkingFolderLbl.Text = x);
 
-				try
-				{
-					var watch = new Stopwatch();
-					watch.Start();
+				FolderNameLbl.Text = $"{path} ";
+				WorkingFolderLbl.Text = "";
+				
+				await  BrowsePath(path, progressDirectory);
 
-					FolderNameLbl.Text = $"{result.Folder.Path} ";
+				var totalSize = (_tree?.Size ?? 0) / 1024.0M / 1024.0M;
+				var elapsedTime = _elapsed?.TotalSeconds ?? 0;
 
-					var tree = new FileSystemNode(result.Folder.Path, null);
-
-					var progressDirectory = new Progress<string>(x => WorkingFolderLbl.Text = x);
-
-					await Task.Run(() => ComputeSizes(tree, result.Folder.Path, progressDirectory));
-
-					watch.Stop();
-
-					FolderNameLbl.Text = $"Done - {tree.Size / 1024.0M / 1024.0M} MB - {watch.Elapsed.TotalSeconds}s - {FolderNameLbl.Text} ";
-				}
-				catch (Exception exception)
-				{
-					FolderNameLbl.Text = exception.Message + Environment.NewLine + exception.StackTrace;
-				}
-
-				IsEnabled = true;
-				Activity.IsRunning = false;
+				FolderNameLbl.Text = $"Done - {totalSize} MB - {elapsedTime}s - {path} ";
 			}
-			else
+			catch (Exception exception)
 			{
-				FolderNameLbl.Text = "Click to select folder ...";
+				var message = new StringBuilder();
+				message.AppendLine(exception.Message);
+				message.AppendLine(exception.StackTrace);
+
+				FolderNameLbl.Text = message.ToString();
 			}
 		}
+
+		IsEnabled = true;
+		Activity.IsRunning = false;
+	}
+
+	private async Task BrowsePath(string path, Progress<string> progressDirectory)
+	{
+		var watch = Stopwatch.StartNew();
+
+		_tree = new FileSystemNode(path, null);
+
+		await ComputeSizes(_tree, progressDirectory);
+
+		watch.Stop();
+
+		_elapsed = watch.Elapsed;
 	}
 
 	private static readonly EnumerationOptions enumOptions = new() { IgnoreInaccessible = true, RecurseSubdirectories = false };
 
-	private static void ComputeSizes(FileSystemNode parent, string path, IProgress<string> progressDirectory)
+	private static async Task ComputeSizes(FileSystemNode parent, IProgress<string> progressDirectory)
 	{
-		var directory = new DirectoryInfo(path);
+		var directory = new DirectoryInfo(parent.FullName);
 
+		await ComputeDirectoriesAsync(parent, directory, progressDirectory).ConfigureAwait(false);
 		ComputeFiles(parent, directory);
-		ComputeDirectories(parent, directory, progressDirectory);
 	}
 
 	private static void ComputeFiles(FileSystemNode parent, DirectoryInfo directory)
@@ -77,29 +88,30 @@ public partial class MainPage : ContentPage
 				parent.AddFile(file.FullName, file.Length);
 			}
 		}
-		catch (Exception exception)
+		catch (Exception ex)
 		{
+			// Log or handle the exception as needed
+			Console.WriteLine($"Exception in ComputeFiles: {ex.Message}");
 		}
 	}
 
-	private static void ComputeDirectories(FileSystemNode parent, DirectoryInfo directory, IProgress<string> progress)
+	private static async Task ComputeDirectoriesAsync(FileSystemNode parent, DirectoryInfo directory, IProgress<string> progress)
 	{
-		progress.Report($"ComputeDirectories - {directory.FullName}");
-
 		try
 		{
 			var folders = directory.EnumerateDirectories("*", enumOptions).OrderBy(x => x.FullName);
 
-			foreach (var folder in folders)
+			var tasks = folders.Select(async folder =>
 			{
 				var node = parent.AddFolder(folder.FullName);
-				ComputeSizes(node, node.FullName, progress);
-			}
+				await Task.Run(() => ComputeSizes(node, progress));
+			});
+
+			await Task.WhenAll(tasks);
 		}
 		catch (Exception exception)
 		{
-			progress.Report($"Exception - {directory.FullName} - {exception.Message}");
+			progress.Report($"Exception - {directory.FullName} - {exception.Message} - {exception.StackTrace}");
 		}
 	}
 }
-
