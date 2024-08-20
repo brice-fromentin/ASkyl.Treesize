@@ -6,24 +6,34 @@ public class FileSystemNode(string path, FileSystemNode? parent)
 
     public string Name { get; set; } = Path.GetFileName(path) ?? "";
 
-    public long Size { get; set; } = 0L;
+    public long Size { get; private set; } = 0L;
 
-    public FileSystemNode? Parent { get; set; } = parent;
+    public FileSystemNode? Parent { get; } = parent;
 
-    public List<FileSystemNode> Folders { get; set; } = [];
+    public List<FileSystemNode> Folders { get; } = [];
 
-    public List<FileSystemNode> Files { get; set; } = [];
+    public List<FileSystemNode> Files { get; } = [];
+
+    public int TotalCount
+    {
+        get => this.Files.Count + this.Folders.Count + this.Folders.Sum(x => x.TotalCount);
+    }
 
     private FileSystemNode AddChild(List<FileSystemNode> entries, string path)
     {
         var entry = new FileSystemNode(path, this);
         entries.Add(entry);
+
         return entry;
     }
 
     private void AddSize(long size)
     {
-        this.Size += size;
+        lock (this)
+        {
+            this.Size += size;
+        }
+
         this.Parent?.AddSize(size);
     }
 
@@ -33,7 +43,7 @@ public class FileSystemNode(string path, FileSystemNode? parent)
     public FileSystemNode AddFile(string path, long size)
     {
         var entry = this.AddChild(this.Files, path);
-        
+
         entry.AddSize(size);
 
         return entry;

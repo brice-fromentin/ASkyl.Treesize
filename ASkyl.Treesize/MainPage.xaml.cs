@@ -35,10 +35,11 @@ public partial class MainPage : ContentPage
 				
 				await  BrowsePath(path, progressDirectory);
 
+				var itemsCount = _tree?.TotalCount ?? 0;
 				var totalSize = (_tree?.Size ?? 0) / 1024.0M / 1024.0M;
 				var elapsedTime = _elapsed?.TotalSeconds ?? 0;
 
-				FolderNameLbl.Text = $"Done - {totalSize} MB - {elapsedTime}s - {path} ";
+				FolderNameLbl.Text = $"Done - {totalSize} MB - {elapsedTime}s - {itemsCount} items - {path} ";
 			}
 			catch (Exception exception)
 			{
